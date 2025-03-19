@@ -3,7 +3,7 @@ use std::f32::consts::{self, PI};
 
 pub type Sample = jack_default_audio_sample_t;
 
-pub trait Filter {
+pub trait Filter: Send {
 	/// Performs the filter on a single sample, returns the output sample
 	fn filter(&mut self, xn: Sample) -> Sample;
 	/// Gets the center frequency
@@ -78,11 +78,11 @@ pub struct LinearFilter {
 }
 
 impl LinearFilter {
-	fn ftype(&self) -> FilterType {
+	pub fn ftype(&self) -> FilterType {
 		self.filter_type
 	}
 
-	fn new_lpf(fs: f32, f0: f32, q: f32) -> Self {
+	pub fn new_lpf(fs: f32, f0: f32, q: f32) -> Self {
 		let w0 = 2.0 * PI * f0;
 		let cosw0 = w0.cos();
 		let alpha = w0.sin() / (2.0 / q);
@@ -109,7 +109,7 @@ impl LinearFilter {
 	}
 
 
-	fn new_hpf(fs: f32, f0: f32, q: f32) -> Self {
+	pub fn new_hpf(fs: f32, f0: f32, q: f32) -> Self {
 		let w0 = 2.0 * PI * f0;
 		let cosw0 = w0.cos();
 		let alpha = w0.sin() / (2.0 / q);
@@ -136,7 +136,7 @@ impl LinearFilter {
 
 	}
 
-	fn new_bpf(fs: f32, f0: f32, q: f32) -> Self {
+	pub fn new_bpf(fs: f32, f0: f32, q: f32) -> Self {
 		let w0 = 2.0 * PI * f0;
 		let cosw0 = w0.cos();
 		let alpha = w0.sin() / (2.0 / q);
