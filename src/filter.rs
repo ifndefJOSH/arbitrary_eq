@@ -1,7 +1,7 @@
 use jack::jack_sys::jack_default_audio_sample_t;
-use std::f32::consts::{self, PI};
+use std::f32::consts::PI;
 
-pub type Sample = jack_default_audio_sample_t;
+pub type Sample = jack_default_audio_sample_t; // f32
 
 pub trait Filter: Send {
 	/// Performs the filter on a single sample, returns the output sample
@@ -122,6 +122,8 @@ pub enum FilterType {
 }
 
 pub struct LinearFilter {
+	/// Whether or not the filter is enabled
+	enabled: bool,
 	/// Filter coefficients
 	coeffs: SecondOrderCoeffs,
 	/// Sample buffer
@@ -141,10 +143,19 @@ impl LinearFilter {
 		self.filter_type
 	}
 
+	pub fn new(fs: f32, f0: f32, q: f32, filter_type: FilterType) -> Self {
+		match filter_type {
+			FilterType::LowPass => Self::new_lpf(fs, f0, q),
+			FilterType::HighPass => Self::new_hpf(fs, f0, q),
+			FilterType::BandPass => Self::new_bpf(fs, f0, q),
+		}
+	}
+
 	pub fn new_lpf(fs: f32, f0: f32, q: f32) -> Self {
 		Self {
-			fs: fs,
-			f0: f0,
+			enabled: true,
+			fs,
+			f0,
 			gain_or_resonance: q,
 			filter_type: FilterType::LowPass,
 			hist: SecondOrderHistory::default(),
@@ -155,8 +166,9 @@ impl LinearFilter {
 
 	pub fn new_hpf(fs: f32, f0: f32, q: f32) -> Self {
 		Self {
-			fs: fs,
-			f0: f0,
+			enabled: true,
+			fs,
+			f0,
 			gain_or_resonance: q,
 			filter_type: FilterType::HighPass,
 			hist: SecondOrderHistory::default(),
@@ -165,10 +177,10 @@ impl LinearFilter {
 	}
 
 	pub fn new_bpf(fs: f32, f0: f32, q: f32) -> Self {
-
 		Self {
-			fs: fs,
-			f0: f0,
+			enabled: true,
+			fs,
+			f0,
 			gain_or_resonance: q,
 			filter_type: FilterType::BandPass,
 			hist: SecondOrderHistory::default(),
@@ -206,6 +218,7 @@ impl Filter for LinearFilter {
 		// update the history
 		(x[0], x[1]) = (xn, x[0]);
 		(y[0], y[1]) = (yn, y[0]);
+		// Return the new result
 		yn
 	}
 
@@ -215,5 +228,48 @@ impl Filter for LinearFilter {
 
 	fn center_freq(&self) -> f32 {
 	    self.f0
+	}
+}
+
+pub struct Equalizer {
+	filters: Vec<LinearFilter>,
+}
+
+impl Equalizer {
+	fn add_filter(&mut self, fs: f32, f0: f32, q: f32, filter_type: FilterType) {
+		self.filters.push(LinearFilter::new(fs, f0, q, filter_type));
+	}
+
+	fn new(bands: usize, fs: f32) -> Self {
+		let num_filters = bands + 2; // Because we want lowpass and highpass filters.
+		Self {
+			filters: (1..=num_filters).map(|i| {
+				let f0 = fs * (i as f32 / num_filters as f32);
+				match i {
+					// lowpass filter at the bottom
+					1 => LinearFilter::new_lpf(fs, f0, 1.0),
+					// Highpass filter at the top
+					num_filters => LinearFilter::new_hpf(fs, f0, 1.0),
+					// Bandpass everywhere else
+					_ => LinearFilter::new_bpf(fs, f0, 1.0),
+				}
+			}).collect::<Vec<_>>()
+		}
+	}
+}
+
+impl Filter for Equalizer {
+	fn filter(&mut self, xn: Sample) -> Sample {
+	    self.filters.iter_mut().fold(xn, |xint, filter| {
+			filter.filter(xint)
+		})
+	}
+
+	fn gain_or_q(&self) -> f32 {
+	    unimplemented!();
+	}
+
+	fn center_freq(&self) -> f32 {
+	    unimplemented!();
 	}
 }
