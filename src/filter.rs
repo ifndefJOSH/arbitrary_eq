@@ -19,35 +19,35 @@ pub trait Filter: Send {
 }
 
 // #[derive(Default)]
-pub struct FilterCoefficients<const OrderPlusOne: usize> {
-	a: [Sample; OrderPlusOne],
-	b: [Sample; OrderPlusOne],
+pub struct FilterCoefficients<const ORDER_PLUS_ONE: usize> {
+	a: [Sample; ORDER_PLUS_ONE],
+	b: [Sample; ORDER_PLUS_ONE],
 }
 
 // pub struct FilterHistory<const Order: usize
 
-impl<const OrderPlusOne: usize> Default for FilterCoefficients<OrderPlusOne> {
+impl<const ORDER_PLUS_ONE: usize> Default for FilterCoefficients<ORDER_PLUS_ONE> {
 	fn default() -> Self {
 		Self {
-			a: [0.0; OrderPlusOne],
-			b: [0.0; OrderPlusOne],
+			a: [0.0; ORDER_PLUS_ONE],
+			b: [0.0; ORDER_PLUS_ONE],
 		}
 	}
 }
 
 // #[derive(Default)]
-pub struct FilterHistory<const Order: usize> {
-	x: [Sample; Order],
-	y: [Sample; Order],
+pub struct FilterHistory<const ORDER: usize> {
+	x: [Sample; ORDER],
+	y: [Sample; ORDER],
 }
 
-// pub struct FilterHistory<const Order: usize
+// pub struct FilterHistory<const ORDER: usize
 
-impl<const Order: usize> Default for FilterHistory<Order> {
+impl<const ORDER: usize> Default for FilterHistory<ORDER> {
 	fn default() -> Self {
 		Self {
-			x: [0.0; Order],
-			y: [0.0; Order],
+			x: [0.0; ORDER],
+			y: [0.0; ORDER],
 		}
 	}
 }
@@ -55,8 +55,67 @@ impl<const Order: usize> Default for FilterHistory<Order> {
 pub type SecondOrderCoeffs = FilterCoefficients<3>;
 pub type SecondOrderHistory = FilterHistory<2>;
 
+impl SecondOrderCoeffs {
+
+		pub fn new_lpf(f0: f32, q: f32) -> Self {
+		let w0 = 2.0 * PI * f0;
+		let cosw0 = w0.cos();
+		let alpha = w0.sin() / (2.0 / q);
+
+		// Compute the filter coefficients
+		let b0 = (1.0 - cosw0) / 2.0;
+        let b1 =  1.0 - cosw0;
+        let b2 = (1.0 - cosw0) / 2.0;
+        let a0 =  1.0 + alpha;
+        let a1 = -2.0 * cosw0;
+        let a2 =  1.0 - alpha;
+		Self {
+			a: [a0, a1, a2],
+			b: [b0, b1, b2],
+		}
+
+	}
+
+
+	pub fn new_hpf(f0: f32, q: f32) -> Self {
+		let w0 = 2.0 * PI * f0;
+		let cosw0 = w0.cos();
+		let alpha = w0.sin() / (2.0 / q);
+
+		// Compute the filter coefficients
+		let b0 = (1.0 + cosw0) / 2.0;
+		let b1 = -(1.0 + cosw0);
+		let b2 = (1.0 + cosw0) / 2.0;
+		let a0 =  1.0 + alpha;
+		let a1 = -2.0 * cosw0;
+		let a2 = 1.0 - alpha;
+		Self {
+			a: [a0, a1, a2],
+			b: [b0, b1, b2],
+		}
+	}
+
+	pub fn new_bpf(f0: f32, q: f32) -> Self {
+		let w0 = 2.0 * PI * f0;
+		let cosw0 = w0.cos();
+		let alpha = w0.sin() / (2.0 / q);
+
+		// Compute the filter coefficients
+		let b0 = q * alpha;
+		let b1 = 0.0;
+		let b2 = -q * alpha;
+		let a0 = 1.0 + alpha;
+		let a1 = -2.0 * cosw0;
+		let a2 = 1.0 - alpha;
+		Self {
+			a: [a0, a1, a2],
+			b: [b0, b1, b2],
+		}
+	}
+}
+
 #[derive(Copy, Clone, PartialEq)]
-enum FilterType {
+pub enum FilterType {
 	LowPass,
 	HighPass,
 	BandPass,
@@ -70,7 +129,7 @@ pub struct LinearFilter {
 	/// Sampling frequency
 	fs: f32,
 	/// Center frequency (in radians): 2.0 * pi * f0 (where f0 is the provided center frequency
-	w0: f32,
+	f0: f32,
 	/// The gain in dB of the filter or the resonance (if it's a LPF/HPF)
 	gain_or_resonance: f32,
 	/// Filter type (bandpass is the constant skirt gain with peak gain of Q)
@@ -83,86 +142,57 @@ impl LinearFilter {
 	}
 
 	pub fn new_lpf(fs: f32, f0: f32, q: f32) -> Self {
-		let w0 = 2.0 * PI * f0;
-		let cosw0 = w0.cos();
-		let alpha = w0.sin() / (2.0 / q);
-
-		// Compute the filter coefficients
-		let b0 = (1.0 - cosw0) / 2.0;
-        let b1 =  1.0 - cosw0;
-        let b2 = (1.0 - cosw0) / 2.0;
-        let a0 =  1.0 + alpha;
-        let a1 = -2.0 * cosw0;
-        let a2 =  1.0 - alpha;
-
 		Self {
 			fs: fs,
-			w0: w0,
+			f0: f0,
 			gain_or_resonance: q,
 			filter_type: FilterType::LowPass,
 			hist: SecondOrderHistory::default(),
-			coeffs: FilterCoefficients {
-				a: [a0, a1, a2],
-				b: [b0, b1, b2],
-			}
+			coeffs: FilterCoefficients::new_lpf(f0, q),
 		}
 	}
 
 
 	pub fn new_hpf(fs: f32, f0: f32, q: f32) -> Self {
-		let w0 = 2.0 * PI * f0;
-		let cosw0 = w0.cos();
-		let alpha = w0.sin() / (2.0 / q);
-
-		// Compute the filter coefficients
-		let b0 = (1.0 + cosw0) / 2.0;
-		let b1 = -(1.0 + cosw0);
-		let b2 = (1.0 + cosw0) / 2.0;
-		let a0 =  1.0 + alpha;
-		let a1 = -2.0 * cosw0;
-		let a2 = 1.0 - alpha;
-
 		Self {
 			fs: fs,
-			w0: w0,
+			f0: f0,
 			gain_or_resonance: q,
 			filter_type: FilterType::HighPass,
 			hist: SecondOrderHistory::default(),
-			coeffs: FilterCoefficients {
-				a: [a0, a1, a2],
-				b: [b0, b1, b2],
-			}
+			coeffs: FilterCoefficients::new_hpf(f0, q),
 		}
-
 	}
 
 	pub fn new_bpf(fs: f32, f0: f32, q: f32) -> Self {
-		let w0 = 2.0 * PI * f0;
-		let cosw0 = w0.cos();
-		let alpha = w0.sin() / (2.0 / q);
-
-
-		// Compute the filter coefficients
-		let b0 = q*alpha;
-		let b1 = 0.0;
-		let b2 = -q*alpha;
-		let a0 = 1.0 + alpha;
-		let a1 = -2.0 * cosw0;
-		let a2 = 1.0 - alpha;
 
 		Self {
 			fs: fs,
-			w0: w0,
+			f0: f0,
 			gain_or_resonance: q,
 			filter_type: FilterType::BandPass,
 			hist: SecondOrderHistory::default(),
-			coeffs: FilterCoefficients {
-				a: [a0, a1, a2],
-				b: [b0, b1, b2],
-			}
+			coeffs: FilterCoefficients::new_bpf(f0, q),
 		}
 	}
 
+	pub fn recalculate_coeffs(&mut self, f0: f32, q: f32) {
+		self.f0 = f0;
+		self.gain_or_resonance = q;
+		self.coeffs = match self.filter_type {
+			FilterType::LowPass => FilterCoefficients::new_lpf(f0, q),
+			FilterType::HighPass => FilterCoefficients::new_hpf(f0, q),
+			FilterType::BandPass => FilterCoefficients::new_bpf(f0, q),
+		};
+	}
+
+	pub fn update_f0(&mut self, f0: f32) {
+		self.recalculate_coeffs(f0, self.gain_or_resonance);
+	}
+
+	pub fn update_gain_or_q(&mut self, gain_or_q: f32) {
+		self.recalculate_coeffs(self.f0, gain_or_q);
+	}
 }
 
 impl Filter for LinearFilter {
@@ -180,10 +210,10 @@ impl Filter for LinearFilter {
 	}
 
 	fn gain_or_q(&self) -> f32 {
-	    unimplemented!();
+		self.gain_or_resonance
 	}
 
 	fn center_freq(&self) -> f32 {
-	    self.w0 / (2.0 * PI)
+	    self.f0
 	}
 }
