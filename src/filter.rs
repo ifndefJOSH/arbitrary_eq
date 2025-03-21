@@ -57,7 +57,7 @@ pub type SecondOrderHistory = FilterHistory<2>;
 
 impl SecondOrderCoeffs {
 
-		pub fn new_lpf(f0: f32, q: f32) -> Self {
+	pub fn new_lpf(f0: f32, q: f32) -> Self {
 		let w0 = 2.0 * PI * f0;
 		let cosw0 = w0.cos();
 		let alpha = w0.sin() / (2.0 / q);
@@ -95,7 +95,7 @@ impl SecondOrderCoeffs {
 		}
 	}
 
-	pub fn new_bpf(f0: f32, q: f32) -> Self {
+	pub fn new_bgf(f0: f32, q: f32) -> Self {
 		let w0 = 2.0 * PI * f0;
 		let cosw0 = w0.cos();
 		let alpha = w0.sin() / (2.0 / q);
@@ -112,12 +112,34 @@ impl SecondOrderCoeffs {
 			b: [b0, b1, b2],
 		}
 	}
+
+	pub fn new_bpf(f0: f32, q: f32) -> Self {
+		let w0 = 2.0 * PI * f0;
+		let cosw0 = w0.cos();
+		let alpha = w0.sin() / (2.0 / q);
+
+		// Compute the filter coefficients
+		let b0 = alpha;
+        let b1 = 0.0;
+        let b2 = -alpha;
+        let a0 = 1.0 + alpha;
+        let a1 = -2.0 * cosw0;
+        let a2 = 1.0 - alpha;
+		Self {
+			a: [a0, a1, a2],
+			b: [b0, b1, b2],
+		}
+	}
 }
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum FilterType {
+	/// Standard lowpass filter
 	LowPass,
+	/// Standard highpass filter
 	HighPass,
+	/// Bandpass filter with constant skirt gain
+	BandGain,
 	BandPass,
 }
 
@@ -147,6 +169,7 @@ impl LinearFilter {
 		match filter_type {
 			FilterType::LowPass => Self::new_lpf(fs, f0, q),
 			FilterType::HighPass => Self::new_hpf(fs, f0, q),
+			FilterType::BandGain => Self::new_bgf(fs, f0, q),
 			FilterType::BandPass => Self::new_bpf(fs, f0, q),
 		}
 	}
@@ -163,7 +186,6 @@ impl LinearFilter {
 		}
 	}
 
-
 	pub fn new_hpf(fs: f32, f0: f32, q: f32) -> Self {
 		Self {
 			enabled: true,
@@ -176,13 +198,25 @@ impl LinearFilter {
 		}
 	}
 
+	pub fn new_bgf(fs: f32, f0: f32, q: f32) -> Self {
+		Self {
+			enabled: true,
+			fs,
+			f0,
+			gain_or_resonance: q,
+			filter_type: FilterType::BandGain,
+			hist: SecondOrderHistory::default(),
+			coeffs: FilterCoefficients::new_bgf(f0, q),
+		}
+	}
+
 	pub fn new_bpf(fs: f32, f0: f32, q: f32) -> Self {
 		Self {
 			enabled: true,
 			fs,
 			f0,
 			gain_or_resonance: q,
-			filter_type: FilterType::BandPass,
+			filter_type: FilterType::BandGain,
 			hist: SecondOrderHistory::default(),
 			coeffs: FilterCoefficients::new_bpf(f0, q),
 		}
@@ -194,6 +228,7 @@ impl LinearFilter {
 		self.coeffs = match self.filter_type {
 			FilterType::LowPass => FilterCoefficients::new_lpf(f0, q),
 			FilterType::HighPass => FilterCoefficients::new_hpf(f0, q),
+			FilterType::BandGain => FilterCoefficients::new_bgf(f0, q),
 			FilterType::BandPass => FilterCoefficients::new_bpf(f0, q),
 		};
 	}
@@ -241,6 +276,7 @@ impl Equalizer {
 	}
 
 	fn new(bands: usize, fs: f32) -> Self {
+		assert!(bands >= 1);
 		let num_filters = bands + 2; // Because we want lowpass and highpass filters.
 		Self {
 			filters: (1..=num_filters).map(|i| {
@@ -250,8 +286,8 @@ impl Equalizer {
 					1 => LinearFilter::new_lpf(fs, f0, 1.0),
 					// Highpass filter at the top
 					num_filters => LinearFilter::new_hpf(fs, f0, 1.0),
-					// Bandpass everywhere else
-					_ => LinearFilter::new_bpf(fs, f0, 1.0),
+					// Band skirt everywhere else
+					_ => LinearFilter::new_bgf(fs, f0, 1.0),
 				}
 			}).collect::<Vec<_>>()
 		}
@@ -260,6 +296,7 @@ impl Equalizer {
 
 impl Filter for Equalizer {
 	fn filter(&mut self, xn: Sample) -> Sample {
+		// Apply each filter in-order
 	    self.filters.iter_mut().fold(xn, |xint, filter| {
 			filter.filter(xint)
 		})
